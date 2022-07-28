@@ -40,7 +40,7 @@ def find_ball(tts, motion, posture, tracker):
     print("Use Ctrl+c to stop this script.")
 
     try:
-        while c:
+        while True:
             time.sleep(1)
     except KeyboardInterrupt:
         print("Interrupted by user")
@@ -49,8 +49,6 @@ def find_ball(tts, motion, posture, tracker):
     # Stop tracker, go to posture Sit.
     tracker.stopTracker()
     tracker.unregisterAllTargets()
-    # posture.goToPosture("Sit", fractionMaxSpeed)
-    # motion.rest()
 
     print("ALTracker stopped.")
 
@@ -139,20 +137,6 @@ def kick(motionProxy, postureProxy):
     isActive = False
     motionProxy.wbEnableEffectorOptimization(effector, isActive)
 
-    # Com go to LLeg
-    # supportLeg = "RLeg"
-    # duration = 2.0
-    # motionProxy.wbGoToBalance(supportLeg, duration)
-
-    # RLeg is free
-    # stateName = "Free"
-    # supportLeg = "LLeg"
-    # motionProxy.wbFootState(stateName, supportLeg)
-
-    # effector = "LLeg"
-    # path = computePath(motionProxy, effector, frame)
-    # motionProxy.transformInterpolations(effector, frame, path, axisMask, times)
-
     time.sleep(1.0)
 
     # Deactivate Head tracking
@@ -174,5 +158,6 @@ if __name__ == '__main__':
     tracker = ALProxy("ALTracker", IP, PORT)
     
     find_ball(tts, mtn, posture, tracker)
-    mo
     kick(mtn, posture)
+
+    
