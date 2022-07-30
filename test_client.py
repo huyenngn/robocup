@@ -3,11 +3,8 @@ import sys
 
 import requests
 
-from naoqi import ALProxy
 from PIL import Image
 import numpy as np
-import math
-import almath
 
 import base64
 from io import BytesIO
@@ -20,8 +17,11 @@ def pil_to_base64(pil_img):
 
     return im_b64
 
-img = Image.open("./output_raw/0.png")
+img = Image.open("./cur.png")
 bim = pil_to_base64(img)
 
-res = requests.post("http://localhost:5000/analyse", json={"b64_img": bim})
+print("TYPPEE", type(bim))
+
+res = requests.post("http://localhost:5000/analyse", data=bim)
 data = res.json()
+print(data)

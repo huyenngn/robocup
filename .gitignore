@@ -1,3 +1,5 @@
 /server/val_data
 .idea
 *.pt
+output_raw
+*.pyc
