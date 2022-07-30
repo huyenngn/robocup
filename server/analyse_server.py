@@ -12,7 +12,7 @@ app = Flask(__name__)
 model = torch.hub.load('ultralytics/yolov5', 'yolov5s', device='cpu')
 model.classes = [32]
 model.max_det = 100
-model.conf = 0.01
+model.conf = 0.1
 
 
 def base64_to_pil(b64_img):
@@ -24,7 +24,7 @@ def base64_to_pil(b64_img):
 
 def generate_json_response(found, x=0, y=0, w=0, h=0):
     # generate json response
-    return {'found': found, 'x': int(x), 'y': int(y), 'w': int(w), 'h': int(h)}
+    return {'found': found, 'x': int(x), 'y': int(y), 'size': int((w + h) / 2)}
 
 
 def check_color(area):
@@ -34,42 +34,39 @@ def check_color(area):
 
 @app.route('/analyse', methods=['POST'])
 def process_json():
-    content_type = request.headers.get('Content-Type')
-    if content_type == 'application/json':
-        req_json = request.json
-        img = base64_to_pil(req_json["b64_img"])
+    img = base64_to_pil(request.data)
 
-        img_data = np.asarray(img)
-        # call nn model
-        results = model([img], size=200, augment=True)
-        # get json format of model output
-        json_outputs = json.loads(results.pandas().xyxy[0].to_json(orient="records"))
-        # if model found one or more balls
-        if len(json_outputs):
-            score = 0
-            out = generate_json_response(False)
-            for json_output in json_outputs:
-                x_p = np.array([int(np.round(json_output["xmin"])), int(np.round(json_output["xmax"]))])
-                y_p = np.array([int(np.round(json_output["ymin"])), int(np.round(json_output["ymax"]))])
-                h = np.abs(y_p[0] - y_p[1])
-                w = np.abs(x_p[0] - x_p[1])
-                # calculate center area extends
-                h_ext = int(h / 8)
-                w_ext = int(w / 8)
-                # check if std of color is less than 15 in the center of the detected area (check main color is gray)
-                if check_color(img_data[y_p[0] + h_ext:y_p[1] - h_ext, x_p[0] + w_ext:x_p[1] - w_ext]) and json_output[
-                    "confidence"] > score:
-                    out = generate_json_response(True, x=np.round(x_p.mean()), y=np.round(y_p.mean()),
-                                                 w=w, h=h)
-                    score = json_output["confidence"]
-            # return detection (max confidence)
-            return out
-        else:
-            # no ball detected
-            return generate_json_response(False)
+    img_data = np.asarray(img)
+    # call nn model
+    results = model([img], size=240, augment=True)
+    # get json format of model output
+    json_outputs = json.loads(results.pandas().xyxy[0].to_json(orient="records"))
+    # if model found one or more balls
+    if len(json_outputs):
+        score = 0
+        out = generate_json_response(False)
+        for json_output in json_outputs:
+            x_p = np.array([int(np.round(json_output["xmin"])), int(np.round(json_output["xmax"]))])
+            y_p = np.array([int(np.round(json_output["ymin"])), int(np.round(json_output["ymax"]))])
+            print(x_p, y_p)
+            h = np.abs(y_p[0] - y_p[1])
+            w = np.abs(x_p[0] - x_p[1])
+            # calculate center area extends
+            h_ext = int(h / 8)
+            w_ext = int(w / 8)
+            # check if std of color is less than 15 in the center of the detected area (check main color is gray)
+            if check_color(img_data[y_p[0] + h_ext:y_p[1] - h_ext, x_p[0] + w_ext:x_p[1] - w_ext]) and json_output[
+                "confidence"] > score:
+                out = generate_json_response(True, x=np.round(x_p.mean()), y=np.round(y_p.mean()),
+                                                w=w, h=h)
+                score = json_output["confidence"]
+        # return detection (max confidence)
+        print(score)
+        return out
     else:
-        return 'Content-Type not supported!'
-
+        print("Not found")
+        # no ball detected
+        return generate_json_response(False)
 
 if __name__ == '__main__':
     app.run()  # run our Flask app
