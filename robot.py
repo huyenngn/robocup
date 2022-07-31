@@ -13,7 +13,19 @@ import pickle
 import time
 import base64
 from io import BytesIO
+import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
 import kick
+import cv2
+def display(in_img, res):
+    x_ext = int(res["size"] / 2)
+    y_ext = int(res["size"] / 2)
+    start_point = (res["x"] - x_ext, res["y"] - y_ext)
+    end_point = (res["x"] + x_ext, res["y"] + y_ext)
+    res_img = np.asarray(in_img)
+    res_img = cv2.rectangle(res_img, start_point, end_point, (255, 0, 0), 2)
+    cv2.imshow("Sheep", res_img[:,:,::-1])
 
 def pil_to_base64(pil_img):
     im_file = BytesIO()
@@ -23,7 +35,7 @@ def pil_to_base64(pil_img):
 
     return im_b64
 
-
+DISPLAY_IMG=True
 CAMERA_FOV_H = np.deg2rad(60.97)
 CAMERA_FOV_V = np.deg2rad(47.64)
 IMAGE_WIDTH = 320
@@ -31,9 +43,10 @@ IMAGE_HEIGHT = 240
 # IMAGE_WIDTH = 640
 # IMAGE_HEIGHT = 480
 BALL_SIZE = 0.1 # in meters
+
 offline_pic = "./output_raw/170.png"
-offline_pic = "./output_raw/127.png"
-offline_pic = "./output_raw/102.png"
+#offline_pic = "./output_raw/127.png"
+#offline_pic = "./output_raw/102.png"
 
 
 
@@ -106,6 +119,8 @@ class Camera:
 
         res = requests.post("http://localhost:5000/analyse", data=bim)
         data = res.json()
+        if DISPLAY_IMG:
+            display(im,data)
 
         print("Recv response", data)
 
@@ -261,9 +276,13 @@ if __name__ == "__main__":
     # rob.start_head_tracking()
 
     dec = rob.cam.detect()
-    print(dec)
+    #print(dec)
     #print(rob.get_coords_nao_space(dec, "CameraTop"))
-    print(rob.get_coords_nao_space(dec, "CameraBottom"))
+    (x,y,z),theta=rob.get_coords_nao_space(dec, "CameraBottom")
+    print("Ball position relative to robot feet (forward: {0}m, left: {1}m, top: {2}m, left_rotation: {3}°)".format(np.round(x,2),np.round(y,2),np.round(z,2),np.round(np.rad2deg(theta),2)))
+    if DISPLAY_IMG:
+        cv2.waitKey(0)
+        sys.exit()
 
 
     # rob.start()
