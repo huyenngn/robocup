@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+from __future__ import print_function
 import sys
 
 import requests 
@@ -9,7 +11,6 @@ import math
 import almath
 import pickle
 import time
-
 import base64
 from io import BytesIO
 import kick
@@ -30,13 +31,24 @@ IMAGE_HEIGHT = 240
 # IMAGE_WIDTH = 640
 # IMAGE_HEIGHT = 480
 BALL_SIZE = 0.1 # in meters
-offline_pic = "./output_raw/10.png"
+offline_pic = "./output_raw/170.png"
+offline_pic = "./output_raw/127.png"
+offline_pic = "./output_raw/102.png"
+
+
 
 class DetectionResult:
     def __init__(self, data):
         self.found = data['found']
-        self.x = (IMAGE_WIDTH // 2 - data['x'] )  * -1
-        self.y = (IMAGE_HEIGHT // 2 - data['y']) * -1
+        self.x = (IMAGE_WIDTH // 2 - data['x'] )*-1
+        self.y = (IMAGE_HEIGHT // 2 - data['y'])
+        #normal coordinate system:
+        #--------------
+        #|            |
+        #|     ↑      |
+        #|      →     |
+        #|            |
+        #--------------
         self.size = data['size']
 
     def get_angles(self):
@@ -133,7 +145,10 @@ class Robot:
 
     def get_coords_nao_space(self, dec, currentCamera="CameraTop"):
         # Compute distance to landmark.
-        z_angle, y_angle, dist = dec.get_angles()
+        #higher image angle on x/y axis -> lower z/y angle robot rotation
+        x_img_angle, y_img_angle, dist = dec.get_angles()
+        z_angle, y_angle=x_img_angle*-1,y_img_angle*-1
+
 
         if self.online:
             # Get current camera position in NAO space.
@@ -143,7 +158,6 @@ class Robot:
         else:
             with open('motionProxyTransform_' + currentCamera + '.pickle', "rb") as f:
                 transform = pickle.load(f)
-                print(np.round(transform, 2)[[3, 7, 11]])
 
         transformList = almath.vectorFloat(transform)
         robotToCamera = almath.Transform(transformList)
@@ -153,7 +167,7 @@ class Robot:
 
         # Compute the translation to reach the landmark.
         cameraToLandmarkTranslationTransform = almath.Transform(dist, 0, 0)
-        print("Dist", dist)
+
 
         # Combine all transformations to get the landmark position in NAO space.
         robotToLandmark = robotToCamera * cameraToLandmarkRotationTransform * cameraToLandmarkTranslationTransform
@@ -248,7 +262,8 @@ if __name__ == "__main__":
 
     dec = rob.cam.detect()
     print(dec)
-    print(rob.get_coords_nao_space(dec, "CameraTop"))
+    #print(rob.get_coords_nao_space(dec, "CameraTop"))
+    print(rob.get_coords_nao_space(dec, "CameraBottom"))
 
 
     # rob.start()
