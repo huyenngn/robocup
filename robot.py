@@ -44,18 +44,22 @@ IMAGE_HEIGHT = 240
 # IMAGE_HEIGHT = 480
 BALL_SIZE = 0.1 # in meters
 
+FX=(320/2)/np.tan(CAMERA_FOV_H/2)
+FY=(240/2)/np.tan(CAMERA_FOV_V/2)
+
 offline_pic = "./output_raw/170.png"
 #offline_pic = "./output_raw/127.png"
 #offline_pic = "./output_raw/102.png"
 
-
+def angle( a, b):
+    return np.arctan2(b[1],b[0]) - np.arctan2(a[1],a[0])
 
 class DetectionResult:
     def __init__(self, data):
         self.found = data['found']
         self.x = (IMAGE_WIDTH // 2 - data['x'] )*-1
         self.y = (IMAGE_HEIGHT // 2 - data['y'])
-        #normal coordinate system:
+        #output coordinate system:
         #--------------
         #|            |
         #|     ↑      |
@@ -63,6 +67,7 @@ class DetectionResult:
         #|            |
         #--------------
         self.size = data['size']
+        
 
     def get_angles(self):
         size_angle = self.size * CAMERA_FOV_H / IMAGE_WIDTH
@@ -72,6 +77,18 @@ class DetectionResult:
         y_angle = self.y * CAMERA_FOV_V / IMAGE_HEIGHT
 
         return x_angle, y_angle, dist
+    
+    
+
+    def get_angles_by_position(self):
+        z = (FX * 0.1) / (self.size)
+        x = ((self.x)*z)/FX
+        y = ((self.y)*z)/FY
+        v_t=np.asarray([z,x,y])
+        dist=np.linalg.norm(v_t)
+        x_ang=[angle([v_t[0],0],[v_t[0],v_t[1]]),
+        angle([v_t[0],0],[v_t[0],v_t[2]])]
+        return x_ang[0], x_ang[1], dist
     
     def __str__(self):
         return "Found: {}, x: {}, y: {}, size: {}".format(self.found, self.x, self.y, self.size)
@@ -158,10 +175,17 @@ class Robot:
         return None
 
 
-    def get_coords_nao_space(self, dec, currentCamera="CameraTop"):
+    def get_coords_nao_space(self, dec, currentCamera="CameraTop",get_angles_by_position=False):
         # Compute distance to landmark.
         #higher image angle on x/y axis -> lower z/y angle robot rotation
-        x_img_angle, y_img_angle, dist = dec.get_angles()
+        if not get_angles_by_position:
+
+            x_img_angle, y_img_angle, dist = dec.get_angles()
+        else:
+            x_img_angle, y_img_angle, dist = dec.get_angles_by_position()
+        print(np.rad2deg(x_img_angle), np.rad2deg(y_img_angle), dist)
+        
+
         z_angle, y_angle=x_img_angle*-1,y_img_angle*-1
 
 
@@ -279,6 +303,10 @@ if __name__ == "__main__":
     #print(dec)
     #print(rob.get_coords_nao_space(dec, "CameraTop"))
     (x,y,z),theta=rob.get_coords_nao_space(dec, "CameraBottom")
+    print("Ball position relative to robot feet (forward: {0}m, left: {1}m, top: {2}m, left_rotation: {3}°)".format(np.round(x,2),np.round(y,2),np.round(z,2),np.round(np.rad2deg(theta),2)))
+
+    print("get_angles_by_position")
+    (x,y,z),theta=rob.get_coords_nao_space(dec, "CameraBottom",True)
     print("Ball position relative to robot feet (forward: {0}m, left: {1}m, top: {2}m, left_rotation: {3}°)".format(np.round(x,2),np.round(y,2),np.round(z,2),np.round(np.rad2deg(theta),2)))
     if DISPLAY_IMG:
         cv2.waitKey(0)
