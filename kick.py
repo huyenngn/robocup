@@ -90,35 +90,8 @@ def kick():
 
     motionProxy.transformInterpolations(effector, frame, path, axisMask, times)
 
-    # Example showing how to Enable Effector Control as an Optimization
-    isActive     = False
-    motionProxy.wbEnableEffectorOptimization(effector, isActive)
-
-    # Com go to LLeg
-    supportLeg = "RLeg"
-    duration   = 2.0
-    motionProxy.wbGoToBalance(supportLeg, duration)
-
-    # RLeg is free
-    stateName  = "Free"
-    supportLeg = "LLeg"
-    motionProxy.wbFootState(stateName, supportLeg)
-
-    effector = "LLeg"
-    path = computePath(motionProxy, effector, frame)
-    motionProxy.transformInterpolations(effector, frame, path, axisMask, times)
-
-    time.sleep(1.0)
-
-    # Deactivate Head tracking
-    isEnabled = False
-    motionProxy.wbEnable(isEnabled)
-
     # send robot to Pose Init
     postureProxy.goToPosture("StandInit", 0.3)
-
-    # Go to rest position
-    motionProxy.rest()
 
 if __name__ == "__main__":
 
