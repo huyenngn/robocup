@@ -10,7 +10,7 @@ from io import BytesIO
 import numpy as np
 
 app = Flask(__name__)
-TORCH_HUB_PATH="/home/hjal/.cache/torch/hub/"
+TORCH_HUB_PATH="/home/philipp/.cache/torch/hub/"
 try:
     model = torch.hub.load('ultralytics/yolov5', 'yolov5s',device='cpu')
 except URLError:
@@ -54,7 +54,6 @@ def process_json():
         for json_output in json_outputs:
             x_p = np.array([int(np.round(json_output["xmin"])), int(np.round(json_output["xmax"]))])
             y_p = np.array([int(np.round(json_output["ymin"])), int(np.round(json_output["ymax"]))])
-            print(x_p, y_p)
             h = np.abs(y_p[0] - y_p[1])
             w = np.abs(x_p[0] - x_p[1])
             # calculate center area extends

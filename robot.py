@@ -3,6 +3,7 @@ from __future__ import print_function
 import cv2
 import kick
 import sys
+import sympy
 
 import requests
 
@@ -104,21 +105,26 @@ class Camera:
             self.camProxy = ALProxy("ALVideoDevice", ip, port)
             resolution = 1  # 320x240
             colorSpace = 11   # RGB
-            self.camProxy.setActiveCamera(0)
+
+            self.unsub()
             self.videoClient = self.camProxy.subscribe(
                 "python_client", resolution, colorSpace, 5)
+        self.set_camera("CameraTop")
 
     def set_camera(self, id):
-        if id == "CameraTop":
-            self.camProxy.setActiveCamera(0)
-        else:
-            self.camProxy.setActiveCamera(1)
-    
+        self.active_camera=id
+        if self.online:
+            if id == "CameraTop":
+                self.camProxy.setActiveCamera(0)
+            else:
+                self.camProxy.setActiveCamera(1)
+
     def unsub(self):
-        subs = self.camProxy.getSubscribers()
-        print(subs)
-        for sub in subs:
-            self.camProxy.unsubscribe(sub)
+        if self.online:
+            subs = self.camProxy.getSubscribers()
+            print(subs)
+            for sub in subs:
+                self.camProxy.unsubscribe(sub)
 
     def get_image(self):
         if not self.online:
@@ -145,10 +151,9 @@ class Camera:
         res = requests.post("http://localhost:5000/analyse", data=bim)
         data = res.json()
 
-
         if DISPLAY_IMG:
             display(im, data)
-            
+
         if data["found"] == False:
             return None
 
@@ -188,7 +193,44 @@ class Robot:
 
         return None
 
-    def get_coords_nao_space(self, dec, currentCamera="CameraTop", get_angles_by_position=False, dist_offset = 0, dist_fac = 1):
+    def get_coords_nao_space_manual(self, dec):
+        currentCamera=self.cam.active_camera
+        print(self.cam.active_camera)
+        x_img_angle, y_img_angle, _ = dec.get_angles()
+
+        z_angle, y_angle = x_img_angle*-1, y_img_angle*-1
+        if self.online:
+            # Get current camera position in NAO space.
+            print("getTrans")
+            transform = self.motionProxy.getTransform(currentCamera, 2, True)
+            
+            with open('motionProxyTransform_' + currentCamera + '.pickle', 'wb') as f:
+                pickle.dump(transform, f, protocol=pickle.HIGHEST_PROTOCOL)
+        else:
+            with open('motionProxyTransform_' + currentCamera + '.pickle', "rb") as f:
+                transform = pickle.load(f)
+
+        transformList = almath.vectorFloat(transform)
+        robotToCamera = almath.Transform(transformList)
+        cameraToLandmarkRotationTransform = almath.Transform_from3DRotation(
+            0, y_angle, z_angle)
+        robotToLandmarkRotation=robotToCamera*cameraToLandmarkRotationTransform
+        start_point=almath.Position3D(0.,0.,0.)
+        end_point=almath.Position3D(1.,0.,0.)
+        trans_start_point=robotToLandmarkRotation*start_point
+        trans_end_point=robotToLandmarkRotation*end_point
+
+        ball_z_pos=0.05
+        plane = sympy.Plane(sympy.Point3D(0,0,ball_z_pos),sympy.Point3D(1,0,ball_z_pos),sympy.Point3D(0,1,ball_z_pos))
+        trans_start_point=sympy.Point3D(trans_start_point.toVector())
+        trans_end_point=sympy.Point3D(trans_end_point.toVector())
+        line = sympy.Line3D(trans_start_point,direction_ratio=trans_end_point-trans_start_point)
+        intr = plane.intersection(line)
+
+        intersection =np.array(intr[0],dtype=float)
+        return (intersection[0], intersection[1], intersection[2]), z_angle,y_angle
+
+    def get_coords_nao_space(self, dec, get_angles_by_position=False, dist_offset=0, dist_fac=1):
         # Compute distance to landmark.
         # higher image angle on x/y axis -> lower z/y angle robot rotation
         if not get_angles_by_position:
@@ -201,6 +243,7 @@ class Robot:
         print(np.rad2deg(x_img_angle), np.rad2deg(y_img_angle), dist)
 
         z_angle, y_angle = x_img_angle*-1, y_img_angle*-1
+        currentCamera=self.cam.active_camera
 
         if self.online:
             # Get current camera position in NAO space.
@@ -231,15 +274,16 @@ class Robot:
 
     def reset(self):
         # self.postureProxy.goToPosture("Crouch", 0.8)
-        self.motionProxy.rest()
+        if self.online:
+            self.motionProxy.rest()
 
     def kick(self):
         kick.kick()
 
-    def move_head(self, dec):
+    def move_head(self, y_angle,z_angle):
         # self.motionProxy.sti
-        self.motionProxy.angleInterpolationWithSpeed("HeadYaw", dec.x, 0.5)
-        self.motionProxy.angleInterpolationWithSpeed("HeadPitch", dec.y, 0.5)
+        #self.motionProxy.angleInterpolationWithSpeed("HeadYaw", y_angle, 0.5)
+        self.motionProxy.changeAngles("HeadPitch", y_angle, 0.05)
 
     def start_head_tracking(self):
         while True:
@@ -248,38 +292,58 @@ class Robot:
                 self.move_head(dec_result)
             time.sleep(1)
 
+
+    def rotate_to_ball(self):
+        dec = self.cam.detect()
+        
+        if dec is None:
+            return False
+        (x, y, z), theta,y_angle = self.get_coords_nao_space_manual(
+            dec)
+        self.move_head(y_angle,theta)
+        print("Ball position relative to robot feet (forward: {0}m, left: {1}m, top: {2}m, left_rotation: {3}°)".format(
+            np.round(x, 2), np.round(y, 2), np.round(z, 2), np.round(np.rad2deg(theta), 2)))
+        self.motionProxy.moveTo(0, 0, theta)
+        self.motionProxy.waitUntilMoveIsFinished()
+        return True
+
+
+    def move_to_ball(self,dist_fac=1,x_offset=0):
+        dec = self.cam.detect()
+        if dec is None:
+            return (False,None)
+        
+        (x, y, z), theta,y_angle = self.get_coords_nao_space_manual(
+            dec)
+        print(np.rad2deg(theta),np.rad2deg(y_angle))
+        print("Ball position relative to robot feet (forward: {0}m, left: {1}m, top: {2}m, left_rotation: {3}°)".format(
+            np.round(x, 2), np.round(y, 2), np.round(z, 2), np.round(np.rad2deg(theta), 2)))
+        print("angle",np.rad2deg(CAMERA_FOV_V/2+y_angle),np.rad2deg(y_angle))
+        
+        self.move_head(CAMERA_FOV_V/1.5-y_angle,theta)
+        dec = self.cam.detect()
+        self.motionProxy.moveTo((x-x_offset)*dist_fac, y*dist_fac, 0)
+        self.motionProxy.waitUntilMoveIsFinished()
+        return True,x-x_offset
+    
     def start(self):
         # dec = self.find_ball_body()
         # if dec is None:
         #     self.tts.say("I couldn't find the ball!")
         #     return
 
-        while True:
-            dec = self.cam.detect()
-            if dec is None:
-                self.tts.say("Lost the ball")
-                break
-            else:
-                # Move to Ball Position
-                (x, y, z), theta = self.get_coords_nao_space(dec, "CameraTop", dist_fac = 0.5)
-                print("Ball position relative to robot feet (forward: {0}m, left: {1}m, top: {2}m, left_rotation: {3}°)".format(
-                    np.round(x, 2), np.round(y, 2), np.round(z, 2), np.round(np.rad2deg(theta), 2)))
-                self.motionProxy.moveTo(0, 0, theta)
-                self.motionProxy.waitUntilMoveIsFinished()
-                # TODO: Adjust head
-                # self.move_head(dec)
-                # self.move_head(dec)
-                dec = self.cam.detect()
-                if dec is None:
-                    break
-                (x, y, z), theta = self.get_coords_nao_space(dec, "CameraTop", dist_fac = 0.5)
-                print("Ball position relative to robot feet (forward: {0}m, left: {1}m, top: {2}m, left_rotation: {3}°)".format(
-                    np.round(x, 2), np.round(y, 2), np.round(z, 2), np.round(np.rad2deg(theta), 2)))
-                self.motionProxy.moveTo(x, y, 0)
-                self.motionProxy.waitUntilMoveIsFinished()
 
-        print("Standing infront of the ball")
+        while True:
+            r_res = self.rotate_to_ball()
+            m_res,_ = self.move_to_ball(dist_fac=0.5)
+            if not r_res or not m_res:
+                break
+        # print("Standing infront of the ball")
         self.cam.set_camera("CameraBottom")
+        rob.motionProxy.angleInterpolationWithSpeed(
+        "HeadPitch", np.deg2rad(20), 0.5)
+
+
 
         # Get final ball position
         # TODO: Adjust offset parameter for kick
@@ -291,43 +355,24 @@ class Robot:
                 break
             else:
                 # Move to Ball Position
-                (x, y, z), theta = self.get_coords_nao_space(dec, "CameraBottom", True, dist_fac = 0.5)
+                r_res=self.rotate_to_ball()
 
-
-                print("Ball position relative to robot feet (forward: {0}m, left: {1}m, top: {2}m, left_rotation: {3}°)".format(
-                    np.round(x, 2), np.round(y, 2), np.round(z, 2), np.round(np.rad2deg(theta), 2)))
-                self.motionProxy.moveTo(0, 0, theta)
-                self.motionProxy.waitUntilMoveIsFinished()
-
-                dec = self.cam.detect()
-                if dec is None:
+                m_res,x_dist=self.move_to_ball(dist_fac=0.5,x_offset=0.15)
+                if not m_res or not r_res:
                     break
-                (x, y, z), theta = self.get_coords_nao_space(dec, "CameraBottom", True, dist_fac = 0.5)
-                print("Ball position relative to robot feet (forward: {0}m, left: {1}m, top: {2}m, left_rotation: {3}°)".format(
-                    np.round(x, 2), np.round(y, 2), np.round(z, 2), np.round(np.rad2deg(theta), 2)))
+                if x_dist<=0.16:
+                    self.kick()
+                    break 
+                #self.move_to_ball_manual(dist_offset=0.5)
+                #if x < 0.25:
+                #    break
+                #break
+                #self.motionProxy.moveTo(x, y, 0)
+                #self.motionProxy.waitUntilMoveIsFinished()
 
-                if x < 0.25:
-                    break
-
-                self.motionProxy.moveTo(x, y, 0)
-                self.motionProxy.waitUntilMoveIsFinished()
-
-        dec = self.cam.detect()
-        (x, y, z), theta = self.get_coords_nao_space(dec, "CameraBottom", True, dist_fac = 0.5)
-        print("Ball position relative to robot feet (forward: {0}m, left: {1}m, top: {2}m, left_rotation: {3}°)".format(
-                np.round(x, 2), np.round(y, 2), np.round(z, 2), np.round(np.rad2deg(theta), 2)))
-        self.motionProxy.moveTo(0, 0, theta)
-
-        dec = self.cam.detect()
-        (x, y, z), theta = self.get_coords_nao_space(dec, "CameraBottom", True, dist_fac = 0.5)
-        print("Ball position relative to robot feet (forward: {0}m, left: {1}m, top: {2}m, left_rotation: {3}°)".format(
-                np.round(x, 2), np.round(y, 2), np.round(z, 2), np.round(np.rad2deg(theta), 2)))
         
-        # self.motionProxy.moveTo(0, 0, theta)
-        # self.motionProxy.waitUntilMoveIsFinished()
 
-
-        # self.kick()
+        
 
 
 if __name__ == "__main__":
@@ -336,16 +381,11 @@ if __name__ == "__main__":
 
     rob = Robot(robotIp, robotPort, online=True)
 
-    try:
-        rob.motionProxy.angleInterpolationWithSpeed("HeadPitch", np.deg2rad(30), 0.5)
-        rob.start()
-        rob.reset()
-    except Exception as e:
-        print("Reseting")
-        rob.cam.unsub()
-        rob.reset()
-        raise e
-
+    rob.motionProxy.angleInterpolationWithSpeed(
+        "HeadPitch", np.deg2rad(20), 0.5)
+    rob.start()
+    rob.cam.unsub()
+    rob.reset()
 
     # dec = rob.find_ball_body()
     # print(dec)
@@ -355,7 +395,7 @@ if __name__ == "__main__":
 
     # print(dec)
     #print(rob.get_coords_nao_space(dec, "CameraTop"))
-    
+
     # while True:
     #     try:
     #         dec = rob.cam.detect()
