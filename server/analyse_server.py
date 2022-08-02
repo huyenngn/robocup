@@ -10,12 +10,13 @@ from io import BytesIO
 import numpy as np
 
 app = Flask(__name__)
-TORCH_HUB_PATH="/home/philipp/.cache/torch/hub/"
+TORCH_HUB_PATH = os.path.expanduser('~')+"/.cache/torch/hub/"
 try:
-    model = torch.hub.load('ultralytics/yolov5', 'yolov5s',device='cpu')
+    model = torch.hub.load('ultralytics/yolov5', 'yolov5s', device='cpu')
 except URLError:
     print("use offline model (no network)")
-    model = torch.hub.load(os.path.join(TORCH_HUB_PATH,'ultralytics_yolov5_master'), 'custom', path='yolov5s.pt', source='local')
+    model = torch.hub.load(os.path.join(
+        TORCH_HUB_PATH, 'ultralytics_yolov5_master'), 'custom', path='yolov5s.pt', source='local')
 model.classes = [32]
 model.max_det = 100
 model.conf = 0.4
@@ -46,14 +47,17 @@ def process_json():
     # call nn model
     results = model([img], size=240, augment=True)
     # get json format of model output
-    json_outputs = json.loads(results.pandas().xyxy[0].to_json(orient="records"))
+    json_outputs = json.loads(
+        results.pandas().xyxy[0].to_json(orient="records"))
     # if model found one or more balls
     if len(json_outputs):
         score = 0
         out = generate_json_response(False)
         for json_output in json_outputs:
-            x_p = np.array([int(np.round(json_output["xmin"])), int(np.round(json_output["xmax"]))])
-            y_p = np.array([int(np.round(json_output["ymin"])), int(np.round(json_output["ymax"]))])
+            x_p = np.array([int(np.round(json_output["xmin"])),
+                           int(np.round(json_output["xmax"]))])
+            y_p = np.array([int(np.round(json_output["ymin"])),
+                           int(np.round(json_output["ymax"]))])
             h = np.abs(y_p[0] - y_p[1])
             w = np.abs(x_p[0] - x_p[1])
             # calculate center area extends
@@ -61,9 +65,9 @@ def process_json():
             w_ext = int(w / 8)
             # check if std of color is less than 15 in the center of the detected area (check main color is gray)
             if check_color(img_data[y_p[0] + h_ext:y_p[1] - h_ext, x_p[0] + w_ext:x_p[1] - w_ext]) and json_output[
-                "confidence"] > score:
+                    "confidence"] > score:
                 out = generate_json_response(True, x=np.round(x_p.mean()), y=np.round(y_p.mean()),
-                                                w=w, h=h)
+                                             w=w, h=h)
                 score = json_output["confidence"]
         # return detection (max confidence)
         print(score)
@@ -72,6 +76,7 @@ def process_json():
         print("Not found")
         # no ball detected
         return generate_json_response(False)
+
 
 if __name__ == '__main__':
     app.run()  # run our Flask app
