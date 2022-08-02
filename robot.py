@@ -231,6 +231,7 @@ class Robot:
         kick.kick()
 
     def move_head(self, y_angle):
+        #move head pitch relative to old position 
         self.motionProxy.changeAngles("HeadPitch", y_angle, 0.05)
 
     def start_head_tracking(self):
@@ -309,7 +310,7 @@ class Robot:
         self.tts.say("no ball in the top camera")
         self.cam.set_camera("CameraBottom")
 
-        # move head to start position
+        # move head to absolut start position (20 grad)
         rob.motionProxy.angleInterpolationWithSpeed(
             "HeadPitch", np.deg2rad(20), 0.5)
 
