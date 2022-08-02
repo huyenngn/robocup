@@ -1,15 +1,21 @@
+from urllib.error import URLError
 from flask import Flask, request
 from PIL import Image
 import torch
 import json
+import os
 
 import base64
 from io import BytesIO
 import numpy as np
 
 app = Flask(__name__)
-
-model = torch.hub.load('ultralytics/yolov5', 'yolov5s', device='cpu')
+TORCH_HUB_PATH="/home/philipp/.cache/torch/hub/"
+try:
+    model = torch.hub.load('ultralytics/yolov5', 'yolov5s',device='cpu')
+except URLError:
+    print("use offline model (no network)")
+    model = torch.hub.load(os.path.join(TORCH_HUB_PATH,'ultralytics_yolov5_master'), 'custom', path='yolov5s.pt', source='local')
 model.classes = [32]
 model.max_det = 100
 model.conf = 0.1
