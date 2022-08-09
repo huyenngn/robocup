@@ -3,3 +3,4 @@
 *.pt
 output_raw
 *.pyc
+detection_img

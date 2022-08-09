@@ -39,14 +39,14 @@ def computePath(proxy, effector, frame):
     return path
 
 
-def kick():
+def kick(motionProxy, postureProxy):
     ''' Example of a whole body kick
     Warning: Needs a PoseInit before executing
              Whole body balancer must be inactivated at the end of the script
     '''
 
-    motionProxy  = ALProxy("ALMotion", IP, PORT)
-    postureProxy = ALProxy("ALRobotPosture", IP, PORT)
+    # motionProxy  = ALProxy("ALMotion", IP, PORT)
+    # postureProxy = ALProxy("ALRobotPosture", IP, PORT)
 
     # Wake up robot
     motionProxy.wakeUp()

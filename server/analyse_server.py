@@ -19,7 +19,7 @@ except URLError:
         TORCH_HUB_PATH, 'ultralytics_yolov5_master'), 'custom', path='yolov5s.pt', source='local')
 model.classes = [32]
 model.max_det = 100
-model.conf = 0.4
+model.conf = 0.2
 
 
 def base64_to_pil(b64_img):
