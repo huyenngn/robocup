@@ -17,7 +17,7 @@ def pil_to_base64(pil_img):
 
     return im_b64
 
-img = Image.open("./cur.png")
+img = Image.open("./output_raw/78.png")
 bim = pil_to_base64(img)
 
 print("TYPPEE", type(bim))
