@@ -20,23 +20,27 @@ from io import BytesIO
 
 CAMERA_FOV_H = np.deg2rad(60.97)
 CAMERA_FOV_V = np.deg2rad(47.64)
+MAX_HEAD_PITCH = 0.5149
+MIN_HEAD_PITCH = -0.6720
+
 IMAGE_WIDTH = 160
 IMAGE_HEIGHT = 120
-# IMAGE_WIDTH = 640
-# IMAGE_HEIGHT = 480
+
 BALL_SIZE = 0.1  # in meters
+
+# Measured time on a distance of 0.25m
 meter_per_sec = np.sqrt(2 * (0.25 ** 2)) / 6.14
 sec_per_meter = 1 / meter_per_sec
 
-
-MAX_HEAD_PITCH = 0.5149
-MIN_HEAD_PITCH = -0.6720
 detection_img_path = "./detection_img"
 if not os.path.exists(detection_img_path):
     os.makedirs(detection_img_path)
 
 offline_pic = "./output_raw/170.png"
 
+MIN_X_DIST_TOP_CAM = 0.3
+MIN_X_DIST_BOT_CAM = 0.15
+DIST_FAC = 0.6
 
 def store_detection_img(in_img, res, num):
     x_ext = int(res["size"] / 2)
@@ -46,9 +50,8 @@ def store_detection_img(in_img, res, num):
     res_img = np.asarray(in_img)
     res_img = cv2.rectangle(res_img, start_point, end_point, (255, 0, 0), 2)
     cv2.imwrite(detection_img_path + "/detection_" +
-                               str(num) + ".png", res_img[:, :, ::-1])
+                str(num) + ".png", res_img[:, :, ::-1])
     cv2.imwrite(detection_img_path + "/detection_cur.png", res_img[:, :, ::-1])
-    # cv2.imshow("Sheep", res_img[:, :, ::-1])
 
 
 def pil_to_base64(pil_img):
@@ -66,7 +69,7 @@ class DetectionResult:
         self.x = (IMAGE_WIDTH // 2 - data['x']) * -1
         self.y = (IMAGE_HEIGHT // 2 - data['y'])
 
-        if abs(self.x) > 120 and abs(self.y) > 80:
+        if abs(self.x) > IMAGE_WIDTH * (7 / 8) and abs(self.y) > IMAGE_HEIGHT * (7 / 8):
             self.found = False
 
         # output coordinate system:
@@ -167,7 +170,8 @@ class Robot:
             self.postureProxy.goToPosture("StandInit", 0.5)
 
     def find_ball_body(self, steps_deg=30):
-        print("Starting find ball")
+        print("Looking for the ball")
+
         step_size = np.deg2rad(steps_deg)
         for cur_angle in range(0, 360, steps_deg):
             print("current angle:", cur_angle)
@@ -242,28 +246,25 @@ class Robot:
         self.cam.unsub()
 
     def kick(self):
-        legName = ["LLeg"]
-        X       = 1
-        Y       = 0.15
-        Theta   = np.deg2rad(20)
-        footSteps = [[X, Y, Theta]]
+        dec = self.cam.detect()
+        if dec is None:
+            return
+
+        (x, y, _), theta, y_angle = self.get_coords_nao_space_manual(dec)
+        self.motionProxy.moveTo((x - MIN_X_DIST_BOT_CAM) * 0.5, y + 0.03, 0)
+
+        # Ausfallschritt
+        foot_steps = [[1, 0.15, np.deg2rad(20)]]
         fractionMaxSpeed = [1.0]
-        clearExisting = False
-        rob.motionProxy.setFootStepsWithSpeed(legName, footSteps, fractionMaxSpeed, clearExisting)
+        rob.motionProxy.setFootStepsWithSpeed(["LLeg"], foot_steps, fractionMaxSpeed, False)
         rob.motionProxy.waitUntilMoveIsFinished()
 
         self.tts.say("Kick!")
 
-        legName = ["RLeg"]
-        X       = 1
-        Y       = 0
-        Theta   = 0
-        footSteps = [[X, Y, Theta]]
-        fractionMaxSpeed = [1.0]
-        clearExisting = False
-        rob.motionProxy.setFootStepsWithSpeed(legName, footSteps, fractionMaxSpeed, clearExisting)
+        # KICK!
+        foot_steps = [[1, 0, 0]]
+        rob.motionProxy.setFootStepsWithSpeed(["RLeg"], foot_steps, fractionMaxSpeed, False)
         rob.motionProxy.waitUntilMoveIsFinished()
-
 
         rob.motionProxy.moveTo(0.01, 0, 0)
         rob.motionProxy.waitUntilMoveIsFinished()
@@ -274,34 +275,27 @@ class Robot:
         self.motionProxy.angleInterpolationWithSpeed(
             "HeadPitch", curAngle + y_angle, 1)
 
-    def rotate_to_ball(self):
-        dec = self.cam.detect()
-        if dec is None:
-            return False
-
-        _, theta, y_angle = self.get_coords_nao_space_manual(dec)
-        self.move_head(y_angle)
-        self.motionProxy.moveTo(0, 0, theta)
-        self.motionProxy.waitUntilMoveIsFinished()
-        return True
-
     def move_head_until_detection(self, steps_deg=5):
         print("Moving Head")
-        curAngle = self.motionProxy.getAngles("HeadPitch", False)[0]
-        while np.abs(curAngle - MAX_HEAD_PITCH) > np.deg2rad(1):
-            print("CurAngle: ", curAngle, MAX_HEAD_PITCH)
+
+        cur_angle = self.motionProxy.getAngles("HeadPitch", False)[0]
+        while np.abs(cur_angle - MAX_HEAD_PITCH) > np.deg2rad(1):
+            print("CurAngle: ", cur_angle, MAX_HEAD_PITCH)
             self.move_head(np.deg2rad(steps_deg))
+
             dec = self.cam.detect()
             if dec is not None:
                 _, _, y_angle = self.get_coords_nao_space_manual(dec)
                 self.move_head(y_angle)
                 return True
-            curAngle = self.motionProxy.getAngles("HeadPitch", False)[0]
-        print("CurAngle: ", curAngle, MAX_HEAD_PITCH)
+
+            cur_angle = self.motionProxy.getAngles("HeadPitch", False)[0]
+
+        print("CurAngle: ", cur_angle, MAX_HEAD_PITCH)
         print("Not detected...")
         return False
 
-    def move_to_ball(self, dist_fac=1., x_offset=0., old_move_vel = np.zeros(2)):
+    def move_to_ball(self, dist_fac=1., x_offset=0., old_move_vel=np.zeros(2)):
         start = time.time()
         dec = self.cam.detect()
         if dec is None:
@@ -309,10 +303,8 @@ class Robot:
 
         (x, y, _), theta, y_angle = self.get_coords_nao_space_manual(dec)
 
+        # Rotate head vertically and robot horizontally
         self.move_head(y_angle)
-        # TODO: Schauen ob hier dec nötig ist
-        # dec = self.cam.detect()
-        # (x, y, _), _, y_angle = self.get_coords_nao_space_manual(dec)
         theta *= 0.8
         if theta > np.deg2rad(5):
             self.motionProxy.stopMove()
@@ -321,13 +313,16 @@ class Robot:
 
         end = time.time()
 
+        # Calculate Distance travelled since detection
         dist_travelled = old_move_vel * (end - start)
 
+        # Calculate position in front of the ball
         move_x = (x - x_offset) * dist_fac
         move_y = y * dist_fac
         move_pos = np.array([move_x, move_y])
         move_pos -= dist_travelled
 
+        # Calculate distance to final position
         dist = np.sqrt(move_pos[0] ** 2 + move_pos[1] ** 2)
         dist_time = sec_per_meter * dist
         move_vel = move_pos / dist_time
@@ -338,80 +333,60 @@ class Robot:
         else:
             return True, x, move_vel, dist
 
-    def correct_move_to_ball(self, min_x_dist=0., detect_on_the_move = False):
+    def correct_move_to_ball(self, min_x_dist=0., detect_on_the_move=False):
         move_vel = np.zeros(2)
         close = False
         not_detected_count = 0
         while True:
-            # rotate to Ball Position
-            #r_res = self.rotate_to_ball()
             # move half distance to the ball
-            ball_found, x_dist, move_vel, dist_estimate = self.move_to_ball(
-                dist_fac=0.6, x_offset=min_x_dist, old_move_vel=move_vel)
-                # if r_res else (False, None)
-            
+            ball_found, x_dist, move_vel, dist_estimate_to_final_pos = self.move_to_ball(
+                dist_fac=DIST_FAC, x_offset=min_x_dist, old_move_vel=move_vel if not close else np.zeros(2))
+
             if not ball_found:
-                # no ball detected -> move head down
-                self.tts.say("Lost ball")
-                print("no ball detected move head down")
                 not_detected_count += 1
+                print("No ball detected. Not_detected_count: ", not_detected_count, "Move active: ", self.motionProxy.moveIsActive())
 
                 if not_detected_count >= 3 or not self.motionProxy.moveIsActive():
+                    print("No ball detected for 3 times. Checking with head")
                     self.motionProxy.waitUntilMoveIsFinished()
                     if not self.move_head_until_detection():
-                        # no ball detected
+                        print("No ball detected after moving head")
                         return False
                     else:
                         not_detected_count = 0
             else:
                 not_detected_count = 0
 
-            print("Dist Estimate", dist_estimate)
-            
             if close:
-                print("Waiting")
                 self.motionProxy.waitUntilMoveIsFinished()
-                move_vel = np.zeros(2)
-
-            elif not detect_on_the_move and dist_estimate < 0.15:
+            elif not detect_on_the_move and dist_estimate_to_final_pos < 0.15:
                 self.motionProxy.stopMove()
-                self.tts.say("I am close to the ball")
-                move_vel = np.zeros(2)
+                print("Close to final position. Going into save mode")
                 close = True
                 continue
-            
-            time.sleep(0.25)
-            print("foo")
 
-            print("x_dist", x_dist, "Dist Thresh", min_x_dist + 0.05)
+            if detect_on_the_move:
+                time.sleep(0.25)
+
+            print("Dist to ball:", x_dist, "Dist Thresh:", min_x_dist + 0.05)
             if x_dist is not None and x_dist <= min_x_dist + 0.05:
                 self.motionProxy.waitUntilMoveIsFinished()
-                # reach position
+                # reached position
                 return True
 
     def start(self):
         self.cam.set_camera("CameraTop")
 
         # rotate until find ball
-
-        dec, detectedTopCam = self.find_ball_body()
+        dec, detected_top_cam = self.find_ball_body()
         if dec is None:
-            return False
+            return
 
-        min_x_dist = 0.15
-        if detectedTopCam:
-        # move to the ball until no one is recognized anymore or reach position
+        if detected_top_cam:
+            # move to the ball until no one is recognized anymore or reach position
             print("start to move to the ball (top camera)")
             self.cam.set_camera("CameraTop")
-
-            reached_position_top_cam = self.correct_move_to_ball(min_x_dist=0.3, detect_on_the_move = True)
-
-            if not reached_position_top_cam:
-                print("No ball in top camera")
-                #self.tts.say("no ball in the top camera")
-            else:
-                #self.tts.say("I reached the ball")
-                print("reached the ball (top camera)")
+            self.correct_move_to_ball(min_x_dist=MIN_X_DIST_TOP_CAM, detect_on_the_move=True)
 
             # move head to absolut start position (20 grad)
             rob.motionProxy.angleInterpolationWithSpeed(
@@ -419,30 +394,17 @@ class Robot:
 
         self.cam.set_camera("CameraBottom")
 
-        # move to the ball until no one is recognized anymore or reach position
-        print("start to move to the ball (bottom camera)")
-        reached_position_bottom_cam = self.correct_move_to_ball(min_x_dist=min_x_dist)
-
+        # Fine adjust for final position
+        print("Start to move to the ball (bottom camera)")
+        reached_position_bottom_cam = self.correct_move_to_ball(min_x_dist=MIN_X_DIST_BOT_CAM)
         if reached_position_bottom_cam:
             # reached the ball
-            self.tts.say("I reached the ball")
-
             print("Standing in front of the ball")
-
             self.motionProxy.waitUntilMoveIsFinished()
-            self.tts.say("Adjusting for kick")
-            dec = self.cam.detect()
-            if dec is None:
-                return False, None
-
-            (x, y, _), theta, y_angle = self.get_coords_nao_space_manual(dec)
-            self.motionProxy.moveTo((x - min_x_dist) * 0.5, y + 0.03, 0)
             self.kick()
-            return True
         else:
             # lost the ball on the way
             self.tts.say("I lost the ball on the way")
-            return False
 
 
 if __name__ == "__main__":
@@ -450,15 +412,9 @@ if __name__ == "__main__":
     robotPort = 9559
     rob = Robot(robotIp, robotPort, online=True)
     try:
-        # rob.motionProxy.angleInterpolationWithSpeed(
-        #     "HeadPitch", np.deg2rad(20), 0.5)
+        rob.motionProxy.angleInterpolationWithSpeed(
+            "HeadPitch", np.deg2rad(20), 0.5)
         rob.start()
-
-        # rob.kick()
-        # rob.motionProxy.post.moveTo(0.2, 0.1, 0)
-        # rob.motionProxy.waitUntilMoveIsFinished()
-        # print("FOOOOOOo")
-
         rob.reset()
     except:
         print("reset...")
