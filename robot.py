@@ -351,14 +351,6 @@ class Robot:
             else:
                 not_detected_count = 0
 
-            # if close:
-            #     self.motionProxy.waitUntilMoveIsFinished()
-            # elif not detect_on_the_move and dist_estimate_to_final_pos < 0.05:
-            #     self.motionProxy.stopMove()
-            #     print("Close to final position. Going into save mode")
-            #     close = True
-            #     continue
-
             print("Dist to ball:", x_dist, "Dist Thresh:", min_x_dist + 0.05)
             if x_dist is not None and x_dist <= min_x_dist + 0.05:
                 self.motionProxy.waitUntilMoveIsFinished()
