@@ -39,8 +39,9 @@ if not os.path.exists(detection_img_path):
 offline_pic = "./output_raw/170.png"
 
 MIN_X_DIST_TOP_CAM = 0.3
-MIN_X_DIST_BOT_CAM = 0.15
-DIST_FAC = 0.6
+MIN_X_DIST_BOT_CAM = 0.20
+DIST_FAC_TOP_CAM = 0.6
+DIST_FAC_BOT_CAM = 1
 
 def store_detection_img(in_img, res, num):
     x_ext = int(res["size"] / 2)
@@ -68,9 +69,6 @@ class DetectionResult:
         self.found = data['found']
         self.x = (IMAGE_WIDTH // 2 - data['x']) * -1
         self.y = (IMAGE_HEIGHT // 2 - data['y'])
-
-        if abs(self.x) > IMAGE_WIDTH * (7 / 8) and abs(self.y) > IMAGE_HEIGHT * (7 / 8):
-            self.found = False
 
         # output coordinate system:
         # --------------
@@ -104,8 +102,8 @@ class Camera:
             resolution = 0  # 320x240
             colorSpace = 11  # RGB
 
-            self.camProxy.setParameter(0, 22, 3)
-            self.camProxy.setParameter(1, 22, 3)
+            # self.camProxy.setParameter(0, 22, 3)
+            # self.camProxy.setParameter(1, 22, 3)
 
             self.unsub()
             self.videoClient = self.camProxy.subscribe(
@@ -201,8 +199,8 @@ class Robot:
         # Get current robot to cam transformation
         if self.online:
             transform = self.motionProxy.getTransform(currentCamera, 2, True)
-            with open('motionProxyTransform_' + currentCamera + '.pickle', 'wb') as f:
-                pickle.dump(transform, f, protocol=pickle.HIGHEST_PROTOCOL)
+            # with open('motionProxyTransform_' + currentCamera + '.pickle', 'wb') as f:
+            #     pickle.dump(transform, f, protocol=pickle.HIGHEST_PROTOCOL)
         else:
             with open('motionProxyTransform_' + currentCamera + '.pickle', "rb") as f:
                 transform = pickle.load(f)
@@ -259,7 +257,7 @@ class Robot:
         rob.motionProxy.setFootStepsWithSpeed(["LLeg"], foot_steps, fractionMaxSpeed, False)
         rob.motionProxy.waitUntilMoveIsFinished()
 
-        self.tts.say("Kick!")
+        self.tts.post.say("Kick!")
 
         # KICK!
         foot_steps = [[1, 0, 0]]
@@ -299,7 +297,7 @@ class Robot:
         start = time.time()
         dec = self.cam.detect()
         if dec is None:
-            return False, None, None, None
+            return False, None, np.zeros(2), None
 
         (x, y, _), theta, y_angle = self.get_coords_nao_space_manual(dec)
 
@@ -333,40 +331,33 @@ class Robot:
         else:
             return True, x, move_vel, dist
 
-    def correct_move_to_ball(self, min_x_dist=0., detect_on_the_move=False):
+    def correct_move_to_ball(self, min_x_dist=0., dist_fac=0.5, detect_on_the_move=False):
         move_vel = np.zeros(2)
         close = False
         not_detected_count = 0
         while True:
             # move half distance to the ball
             ball_found, x_dist, move_vel, dist_estimate_to_final_pos = self.move_to_ball(
-                dist_fac=DIST_FAC, x_offset=min_x_dist, old_move_vel=move_vel if not close else np.zeros(2))
+                dist_fac=dist_fac, x_offset=min_x_dist, old_move_vel=move_vel if not close else np.zeros(2))
 
             if not ball_found:
                 not_detected_count += 1
                 print("No ball detected. Not_detected_count: ", not_detected_count, "Move active: ", self.motionProxy.moveIsActive())
+                self.tts.say("Lost the ball")
 
                 if not_detected_count >= 3 or not self.motionProxy.moveIsActive():
-                    print("No ball detected for 3 times. Checking with head")
-                    self.motionProxy.waitUntilMoveIsFinished()
-                    if not self.move_head_until_detection():
-                        print("No ball detected after moving head")
-                        return False
-                    else:
-                        not_detected_count = 0
+                    print("No ball detected for 3 times or not moving")
+                    return False
             else:
                 not_detected_count = 0
 
-            if close:
-                self.motionProxy.waitUntilMoveIsFinished()
-            elif not detect_on_the_move and dist_estimate_to_final_pos < 0.15:
-                self.motionProxy.stopMove()
-                print("Close to final position. Going into save mode")
-                close = True
-                continue
-
-            if detect_on_the_move:
-                time.sleep(0.25)
+            # if close:
+            #     self.motionProxy.waitUntilMoveIsFinished()
+            # elif not detect_on_the_move and dist_estimate_to_final_pos < 0.05:
+            #     self.motionProxy.stopMove()
+            #     print("Close to final position. Going into save mode")
+            #     close = True
+            #     continue
 
             print("Dist to ball:", x_dist, "Dist Thresh:", min_x_dist + 0.05)
             if x_dist is not None and x_dist <= min_x_dist + 0.05:
@@ -386,21 +377,20 @@ class Robot:
             # move to the ball until no one is recognized anymore or reach position
             print("start to move to the ball (top camera)")
             self.cam.set_camera("CameraTop")
-            self.correct_move_to_ball(min_x_dist=MIN_X_DIST_TOP_CAM, detect_on_the_move=True)
+            self.correct_move_to_ball(min_x_dist=MIN_X_DIST_TOP_CAM, dist_fac=DIST_FAC_TOP_CAM, detect_on_the_move=True)
 
             # move head to absolut start position (20 grad)
             rob.motionProxy.angleInterpolationWithSpeed(
-                "HeadPitch", np.deg2rad(20), 0.5)
+                "HeadPitch", np.deg2rad(20), 1)
 
         self.cam.set_camera("CameraBottom")
 
         # Fine adjust for final position
         print("Start to move to the ball (bottom camera)")
-        reached_position_bottom_cam = self.correct_move_to_ball(min_x_dist=MIN_X_DIST_BOT_CAM)
+        reached_position_bottom_cam = self.correct_move_to_ball(min_x_dist=MIN_X_DIST_BOT_CAM, dist_fac=DIST_FAC_BOT_CAM)
         if reached_position_bottom_cam:
             # reached the ball
             print("Standing in front of the ball")
-            self.motionProxy.waitUntilMoveIsFinished()
             self.kick()
         else:
             # lost the ball on the way

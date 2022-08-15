@@ -37,6 +37,7 @@ def generate_json_response(found, x=0, y=0, w=0, h=0):
 def check_color(area):
     """
     check if the area is a color"""
+    return True
     a = area.mean(axis=(0, 1)).std() < 15
     return a
 
@@ -45,11 +46,11 @@ def check_color(area):
 def process_json():
     img = base64_to_pil(request.data)
 
-    img.save("./test.png")
+    img.save("test.png")
 
     img_data = np.asarray(img)
     # call nn model
-    results = model([img], size=120, augment=True)
+    results = model([img], size=240, augment=True)
     # get json format of model output
     json_outputs = json.loads(
         results.pandas().xyxy[0].to_json(orient="records"))
